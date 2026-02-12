@@ -10,7 +10,7 @@
     "STATEMENTS_JSON_PATH": "/tmp/statements_db.json"
   },
   "functions": {
-    "api/index.py": {
+    "api/*.py": {
       "includeFiles": "PRD/**"
     }
   }
