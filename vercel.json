@@ -1,0 +1,17 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    }
+  ],
+  "env": {
+    "SOA_DB_PATH": "/tmp/app.db",
+    "STATEMENTS_JSON_PATH": "/tmp/statements_db.json"
+  },
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "PRD/**"
+    }
+  }
+}
