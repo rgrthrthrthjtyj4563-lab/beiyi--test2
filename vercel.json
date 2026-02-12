@@ -8,10 +8,5 @@
   "env": {
     "SOA_DB_PATH": "/tmp/app.db",
     "STATEMENTS_JSON_PATH": "/tmp/statements_db.json"
-  },
-  "functions": {
-    "api/*.py": {
-      "includeFiles": "PRD/**"
-    }
   }
 }

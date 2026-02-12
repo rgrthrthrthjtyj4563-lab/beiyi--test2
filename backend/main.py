@@ -82,7 +82,7 @@ app.add_middleware(
 )
 app.add_middleware(_ApiPrefixMiddleware)
 
-TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "PRD" / "Statement of Account.xlsx"
+TEMPLATE_PATH = Path(__file__).resolve().parent / "data" / "Statement of Account.xlsx"
 PREVIEW_TIMEOUT_SECONDS = 30
 RUN_SYNC_SUPPORTS_CANCELLABLE = "cancellable" in inspect.signature(anyio.to_thread.run_sync).parameters
 
