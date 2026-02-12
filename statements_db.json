@@ -1,0 +1,943 @@
+{
+  "a7d34922-cc47-4f3e-8f5d-9f7314a37ede": {
+    "id": "a7d34922-cc47-4f3e-8f5d-9f7314a37ede",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T13:44:09.248481",
+    "updated_at": "2026-02-11T13:44:09.248484",
+    "statement": {
+      "customer": "Test Corp",
+      "period": "2024-Q1",
+      "target_amount": 10000.5,
+      "summary": {
+        "target_amount": 10000.5,
+        "generated_amount": 10000.5,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 3200.0,
+            "ratio": 0.32
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 5964.0,
+            "ratio": 0.5964
+          },
+          "L4": {
+            "amount": 836.5,
+            "ratio": 0.0836
+          }
+        },
+        "warnings": [
+          "L1 ratio 32.00% deviates significantly from target 55.00%",
+          "L2 ratio 0.00% deviates significantly from target 30.00%",
+          "L3 ratio 59.64% deviates significantly from target 10.00%",
+          "L4 ratio 8.36% exceeds limit of 5%"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "System (Fixed)"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 6.0,
+          "amount": 180.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L1",
+          "name": "医院信息调研管理",
+          "unit": "元/条",
+          "price": 30.0,
+          "quantity": 1.0,
+          "amount": 30.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 4.0,
+          "amount": 120.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L1",
+          "name": "药店协访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 4.0,
+          "amount": 120.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L1",
+          "name": "商业拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 8.0,
+          "amount": 240.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L1",
+          "name": "品种准入",
+          "unit": "元/条",
+          "price": 30.0,
+          "quantity": 7.0,
+          "amount": 210.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L1",
+          "name": "随访管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "System (Mock)"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 10.0,
+          "amount": 3000.0,
+          "source": "Simulation"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 13.0,
+          "amount": 2444.0,
+          "source": "Simulation"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 52.0,
+          "amount": 520.0,
+          "source": "Simulation"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.673,
+          "amount": 836.5,
+          "source": "Tail Adjustment"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T13:44:09.248485",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "f809aed1-b7e6-4ccb-ba68-f7fb7832d4e5": {
+    "id": "f809aed1-b7e6-4ccb-ba68-f7fb7832d4e5",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:07:48.835001",
+    "updated_at": "2026-02-11T14:07:48.835004",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6626.0,
+            "ratio": 0.6626
+          },
+          "L4": {
+            "amount": 924.0,
+            "ratio": 0.0924
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 66.26% 严重偏离目标 10.00%",
+          "L4 占比 9.24% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 11.0,
+          "amount": 3300.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 17.0,
+          "amount": 3196.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 13.0,
+          "amount": 130.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.848,
+          "amount": 924.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:07:48.835004",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "a0ef3497-aab1-4433-9f5d-12f1477adfb3": {
+    "id": "a0ef3497-aab1-4433-9f5d-12f1477adfb3",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:08:00.568615",
+    "updated_at": "2026-02-11T14:08:00.568619",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6774.0,
+            "ratio": 0.6774
+          },
+          "L4": {
+            "amount": 776.0,
+            "ratio": 0.0776
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 67.74% 严重偏离目标 10.00%",
+          "L4 占比 7.76% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 14.0,
+          "amount": 4200.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 13.0,
+          "amount": 130.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 13.0,
+          "amount": 2444.0,
+          "source": "智能补齐"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.552,
+          "amount": 776.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:08:00.568620",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "a64d8f40-8af2-4582-9be3-f7bd2a0f5f2a": {
+    "id": "a64d8f40-8af2-4582-9be3-f7bd2a0f5f2a",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:08:43.026915",
+    "updated_at": "2026-02-11T14:08:43.026918",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6686.0,
+            "ratio": 0.6686
+          },
+          "L4": {
+            "amount": 864.0,
+            "ratio": 0.0864
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 66.86% 严重偏离目标 10.00%",
+          "L4 占比 8.64% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 14.0,
+          "amount": 4200.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 12.0,
+          "amount": 2256.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 23.0,
+          "amount": 230.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.728,
+          "amount": 864.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:08:43.026919",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "7342f45c-e102-440b-8cea-228535d1203b": {
+    "id": "7342f45c-e102-440b-8cea-228535d1203b",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:09:05.139208",
+    "updated_at": "2026-02-11T14:09:05.139211",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6656.0,
+            "ratio": 0.6656
+          },
+          "L4": {
+            "amount": 894.0,
+            "ratio": 0.0894
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 66.56% 严重偏离目标 10.00%",
+          "L4 占比 8.94% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 14.0,
+          "amount": 4200.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 12.0,
+          "amount": 2256.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 20.0,
+          "amount": 200.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.788,
+          "amount": 894.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:09:05.139212",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "e7db4928-8631-435b-9ded-a2be204768e0": {
+    "id": "e7db4928-8631-435b-9ded-a2be204768e0",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:09:18.827671",
+    "updated_at": "2026-02-11T14:09:18.827674",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6610.0,
+            "ratio": 0.661
+          },
+          "L4": {
+            "amount": 940.0,
+            "ratio": 0.094
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 66.10% 严重偏离目标 10.00%",
+          "L4 占比 9.40% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 12.0,
+          "amount": 3600.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 19.0,
+          "amount": 190.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 15.0,
+          "amount": 2820.0,
+          "source": "智能补齐"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.88,
+          "amount": 940.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:09:18.827675",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "4f8a0b0b-4e2e-4b4d-b6e4-9a5cb978d8b3": {
+    "id": "4f8a0b0b-4e2e-4b4d-b6e4-9a5cb978d8b3",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:09:54.628386",
+    "updated_at": "2026-02-11T14:09:54.628389",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6550.0,
+            "ratio": 0.655
+          },
+          "L4": {
+            "amount": 1000.0,
+            "ratio": 0.1
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 65.50% 严重偏离目标 10.00%",
+          "L4 占比 10.00% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 15.0,
+          "amount": 4500.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 17.0,
+          "amount": 170.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 10.0,
+          "amount": 1880.0,
+          "source": "智能补齐"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 2.0,
+          "amount": 1000.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:09:54.628389",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  },
+  "415cdd24-edd4-456b-8744-5784f99f82b5": {
+    "id": "415cdd24-edd4-456b-8744-5784f99f82b5",
+    "status": "DRAFT",
+    "created_at": "2026-02-11T14:10:29.052592",
+    "updated_at": "2026-02-11T14:10:29.052595",
+    "statement": {
+      "customer": "Test Customer",
+      "period": "2024-01",
+      "target_amount": 10000.0,
+      "summary": {
+        "target_amount": 10000.0,
+        "generated_amount": 10000.0,
+        "diff": 0.0,
+        "layers": {
+          "L1": {
+            "amount": 2450.0,
+            "ratio": 0.245
+          },
+          "L2": {
+            "amount": 0,
+            "ratio": 0.0
+          },
+          "L3": {
+            "amount": 6774.0,
+            "ratio": 0.6774
+          },
+          "L4": {
+            "amount": 776.0,
+            "ratio": 0.0776
+          }
+        },
+        "warnings": [
+          "L1 占比 24.50% 严重偏离目标 55.00%",
+          "L2 占比 0.00% 严重偏离目标 30.00%",
+          "L3 占比 67.74% 严重偏离目标 10.00%",
+          "L4 占比 7.76% 超过 5% 上限"
+        ]
+      },
+      "items": [
+        {
+          "level": "L1",
+          "name": "医院拜访",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 10.0,
+          "amount": 300.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "跟台管理",
+          "unit": "元/次",
+          "price": 30.0,
+          "quantity": 5.0,
+          "amount": 150.0,
+          "source": "业务真实数据"
+        },
+        {
+          "level": "L1",
+          "name": "租户基础服务费",
+          "unit": "元/月",
+          "price": 2000.0,
+          "quantity": 1.0,
+          "amount": 2000.0,
+          "source": "系统固定"
+        },
+        {
+          "level": "L3",
+          "name": "大师/案例课（A档）",
+          "unit": "元/节",
+          "price": 300.0,
+          "quantity": 14.0,
+          "amount": 4200.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "专业实务课（B档）",
+          "unit": "元/节",
+          "price": 188.0,
+          "quantity": 13.0,
+          "amount": 2444.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L3",
+          "name": "付费课件&精选内容包",
+          "unit": "元/份",
+          "price": 10.0,
+          "quantity": 13.0,
+          "amount": 130.0,
+          "source": "智能模拟"
+        },
+        {
+          "level": "L4",
+          "name": "代理记账",
+          "unit": "月",
+          "price": 500.0,
+          "quantity": 1.552,
+          "amount": 776.0,
+          "source": "尾差调整"
+        }
+      ]
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-11T14:10:29.052596",
+        "action": "CREATED",
+        "note": "Initial generation"
+      }
+    ]
+  }
+}

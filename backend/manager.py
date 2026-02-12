@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
-from backend.models import Statement, StatementItem, StatementSummary
+from models import Statement, StatementItem, StatementSummary
 
 _DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "app.db"
 DB_PATH = Path(os.getenv("SOA_DB_PATH", str(_DEFAULT_DB_PATH))).expanduser().resolve()
@@ -27,6 +27,8 @@ class StatementRecord(BaseModel):
     rule_template_name: Optional[str] = None
     rule_template_version: Optional[int] = None
     rule_strategy_name: Optional[str] = None
+    engine_version: Optional[str] = None
+    rule_snapshot_version: Optional[int] = None
     rule_snapshot: Optional[Dict] = None
 
 
@@ -57,6 +59,8 @@ class StatementManager:
                     rule_template_name TEXT,
                     rule_template_version INTEGER,
                     rule_strategy_name TEXT,
+                    engine_version TEXT,
+                    rule_snapshot_version INTEGER,
                     rule_snapshot_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -76,6 +80,11 @@ class StatementManager:
                     quantity REAL NOT NULL,
                     amount REAL NOT NULL,
                     source TEXT NOT NULL,
+                    quantity_mode TEXT NOT NULL DEFAULT 'ACTUAL_FULL',
+                    actual_qty REAL NOT NULL DEFAULT 0,
+                    billed_qty REAL NOT NULL DEFAULT 0,
+                    unbilled_qty REAL NOT NULL DEFAULT 0,
+                    decision_reason_code TEXT NOT NULL DEFAULT '',
                     FOREIGN KEY(statement_id) REFERENCES statements(id)
                 )
                 """
@@ -104,12 +113,10 @@ class StatementManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_statement_history_statement ON statement_history(statement_id)")
 
             columns = [r["name"] for r in conn.execute("PRAGMA table_info(statements)").fetchall()]
-            if "rule_template_name" not in columns:
-                conn.execute("ALTER TABLE statements ADD COLUMN rule_template_name TEXT")
-            if "rule_template_version" not in columns:
-                conn.execute("ALTER TABLE statements ADD COLUMN rule_template_version INTEGER")
-            if "rule_strategy_name" not in columns:
-                conn.execute("ALTER TABLE statements ADD COLUMN rule_strategy_name TEXT")
+            if "engine_version" not in columns:
+                conn.execute("ALTER TABLE statements ADD COLUMN engine_version TEXT")
+            if "rule_snapshot_version" not in columns:
+                conn.execute("ALTER TABLE statements ADD COLUMN rule_snapshot_version INTEGER")
             if "rule_snapshot_json" not in columns:
                 conn.execute("ALTER TABLE statements ADD COLUMN rule_snapshot_json TEXT")
 
@@ -118,6 +125,16 @@ class StatementManager:
                 conn.execute("ALTER TABLE statement_items ADD COLUMN category TEXT DEFAULT ''")
             if "billing_note" not in item_columns:
                 conn.execute("ALTER TABLE statement_items ADD COLUMN billing_note TEXT DEFAULT ''")
+            if "quantity_mode" not in item_columns:
+                conn.execute("ALTER TABLE statement_items ADD COLUMN quantity_mode TEXT NOT NULL DEFAULT 'ACTUAL_FULL'")
+            if "actual_qty" not in item_columns:
+                conn.execute("ALTER TABLE statement_items ADD COLUMN actual_qty REAL NOT NULL DEFAULT 0")
+            if "billed_qty" not in item_columns:
+                conn.execute("ALTER TABLE statement_items ADD COLUMN billed_qty REAL NOT NULL DEFAULT 0")
+            if "unbilled_qty" not in item_columns:
+                conn.execute("ALTER TABLE statement_items ADD COLUMN unbilled_qty REAL NOT NULL DEFAULT 0")
+            if "decision_reason_code" not in item_columns:
+                conn.execute("ALTER TABLE statement_items ADD COLUMN decision_reason_code TEXT NOT NULL DEFAULT ''")
 
             conn.commit()
 
@@ -158,9 +175,9 @@ class StatementManager:
                     """
                     INSERT INTO statements (
                         id, status, customer, period, target_amount, summary_json,
-                        rule_template_name, rule_template_version, rule_strategy_name, rule_snapshot_json,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        rule_template_name, rule_template_version, rule_strategy_name, engine_version,
+                        rule_snapshot_version, rule_snapshot_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.id,
@@ -187,8 +204,9 @@ class StatementManager:
                     conn.execute(
                         """
                         INSERT INTO statement_items (
-                            statement_id, item_order, level, name, unit, price, quantity, amount, source, category, billing_note
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            statement_id, item_order, level, name, unit, price, quantity, amount, source,
+                            quantity_mode, actual_qty, billed_qty, unbilled_qty, decision_reason_code, category, billing_note
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             record.id,
@@ -200,6 +218,11 @@ class StatementManager:
                             float(item.quantity),
                             float(item.amount),
                             str(item.source),
+                            str(getattr(item, "quantity_mode", "ACTUAL_FULL")),
+                            float(getattr(item, "actual_qty", 0.0)),
+                            float(getattr(item, "billed_qty", 0.0)),
+                            float(getattr(item, "unbilled_qty", 0.0)),
+                            str(getattr(item, "decision_reason_code", "")),
                             str(item.category),
                             str(item.billing_note),
                         ),
@@ -228,7 +251,8 @@ class StatementManager:
     def _build_record(self, conn: sqlite3.Connection, row: sqlite3.Row) -> StatementRecord:
         items_rows = conn.execute(
             """
-            SELECT level, name, unit, price, quantity, amount, source, category, billing_note
+            SELECT level, name, unit, price, quantity, amount, source, quantity_mode,
+                   actual_qty, billed_qty, unbilled_qty, decision_reason_code, category, billing_note
             FROM statement_items
             WHERE statement_id = ?
             ORDER BY item_order ASC, id ASC
@@ -268,6 +292,8 @@ class StatementManager:
             rule_template_name=row["rule_template_name"],
             rule_template_version=int(row["rule_template_version"]) if row["rule_template_version"] is not None else None,
             rule_strategy_name=row["rule_strategy_name"],
+            engine_version=row["engine_version"],
+            rule_snapshot_version=int(row["rule_snapshot_version"]) if row["rule_snapshot_version"] is not None else None,
             rule_snapshot=json.loads(snapshot_raw) if snapshot_raw else None,
         )
 
@@ -277,22 +303,25 @@ class StatementManager:
         rule_template_name: Optional[str] = None,
         rule_template_version: Optional[int] = None,
         rule_strategy_name: Optional[str] = None,
+        engine_version: Optional[str] = None,
+        rule_snapshot_version: Optional[int] = None,
         rule_snapshot: Optional[Dict] = None,
     ) -> StatementRecord:
         stmt_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
+        status = "DRAFT"
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO statements (
                     id, status, customer, period, target_amount, summary_json,
-                    rule_template_name, rule_template_version, rule_strategy_name, rule_snapshot_json,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rule_template_name, rule_template_version, rule_strategy_name, engine_version,
+                    rule_snapshot_version, rule_snapshot_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     stmt_id,
-                    "DRAFT",
+                    status,
                     statement.customer,
                     statement.period,
                     float(statement.target_amount),
@@ -305,6 +334,8 @@ class StatementManager:
                     rule_template_name,
                     int(rule_template_version) if rule_template_version is not None else None,
                     rule_strategy_name,
+                    engine_version,
+                    int(rule_snapshot_version) if rule_snapshot_version is not None else None,
                     json.dumps(rule_snapshot, ensure_ascii=False) if rule_snapshot else None,
                     now,
                     now,
@@ -315,8 +346,9 @@ class StatementManager:
                 conn.execute(
                     """
                     INSERT INTO statement_items (
-                        statement_id, item_order, level, name, unit, price, quantity, amount, source, category, billing_note
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        statement_id, item_order, level, name, unit, price, quantity, amount, source,
+                        quantity_mode, actual_qty, billed_qty, unbilled_qty, decision_reason_code, category, billing_note
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         stmt_id,
@@ -328,6 +360,11 @@ class StatementManager:
                         float(item.quantity),
                         float(item.amount),
                         str(item.source),
+                        str(item.quantity_mode),
+                        float(item.actual_qty),
+                        float(item.billed_qty),
+                        float(item.unbilled_qty),
+                        str(item.decision_reason_code),
                         str(item.category),
                         str(item.billing_note),
                     ),

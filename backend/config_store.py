@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import sqlite3
 from datetime import datetime
@@ -15,20 +16,96 @@ DEFAULT_RULE_TEMPLATE = {
     "ratio_warning_threshold": 0.15,
     "fill_order": ["L2", "L3", "L4"],
     "strategy_name": "equal_split_v1",
+    "selection_strategy": "priority_greedy_v1",
+    "enabled_item_ids": [],
+    "tail_diff_threshold": 0.0,
+    "fallback_l3_item_id": None,
+    "max_simulation_ratio": 1.0,
     "version": 1,
 }
 
 ALLOCATION_STRATEGIES = [
     {"key": "equal_split_v1", "label": "等额分摊策略"},
     {"key": "price_weighted_v1", "label": "按单价权重策略"},
+    {"key": "priority_greedy_v1", "label": "优先级贪心策略"},
 ]
 
 
 VALID_LEVELS = ["L1", "L2", "L3", "L4"]
+VALID_STATUS = {"启用", "停用", "ACTIVE", "INACTIVE"}
+VALID_BILLING_MODES = {"固定入账", "智能择取", "模拟填充"}
+VALID_QUANTITY_MODES = {"ACTUAL_FULL", "ACTUAL_SELECTABLE", "SIMULATED", "MANUAL"}
 
 
 def _now_iso() -> str:
     return datetime.now().isoformat()
+
+
+def _to_int_flag(val: Any, default: int = 0) -> int:
+    try:
+        return int(bool(val))
+    except Exception:
+        return int(default)
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        x = float(val)
+        if math.isnan(x) or math.isinf(x):
+            return float(default)
+        return x
+    except Exception:
+        return float(default)
+
+
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        return int(val)
+    except Exception:
+        return int(default)
+
+
+def _safe_text(val: Any, default: str = "") -> str:
+    if val is None:
+        return default
+    text = str(val).strip()
+    return text if text else default
+
+
+def _normalize_status(raw_status: Any) -> str:
+    status = _safe_text(raw_status, "启用")
+    if status == "ACTIVE":
+        return "启用"
+    if status == "INACTIVE":
+        return "停用"
+    if status in {"启用", "停用"}:
+        return status
+    return "启用"
+
+
+def _derive_billing_mode(payload: Dict[str, Any]) -> str:
+    mode = _safe_text(payload.get("billing_mode"), "")
+    if mode in VALID_BILLING_MODES:
+        return mode
+
+    quantity_mode = _safe_text(payload.get("quantity_mode"), "").upper()
+    if quantity_mode == "ACTUAL_FULL":
+        return "固定入账"
+    if quantity_mode == "ACTUAL_SELECTABLE":
+        return "智能择取"
+    if quantity_mode == "SIMULATED":
+        return "模拟填充"
+    return "智能择取"
+
+
+def _derive_quantity_mode(payload: Dict[str, Any]) -> str:
+    raw_mode = str(payload.get("quantity_mode", "") or "").strip().upper()
+    if raw_mode in {"ACTUAL_FULL", "ACTUAL_SELECTABLE", "SIMULATED", "MANUAL"}:
+        return raw_mode
+
+    if bool(payload.get("can_simulate", False)):
+        return "SIMULATED"
+    return "ACTUAL_FULL"
 
 
 class ConfigStore:
@@ -57,6 +134,13 @@ class ConfigStore:
                     is_existing INTEGER NOT NULL DEFAULT 0,
                     can_simulate INTEGER NOT NULL DEFAULT 0,
                     must_use INTEGER NOT NULL DEFAULT 0,
+                    is_enabled_default INTEGER NOT NULL DEFAULT 1,
+                    quantity_mode TEXT NOT NULL DEFAULT 'ACTUAL_FULL',
+                    min_pick_ratio REAL NOT NULL DEFAULT 0,
+                    max_pick_ratio REAL NOT NULL DEFAULT 1,
+                    pick_priority INTEGER NOT NULL DEFAULT 100,
+                    report_required INTEGER NOT NULL DEFAULT 0,
+                    tail_balance_eligible INTEGER NOT NULL DEFAULT 0,
                     allow_discount INTEGER NOT NULL DEFAULT 0,
                     status TEXT NOT NULL DEFAULT 'ACTIVE',
                     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -69,10 +153,93 @@ class ConfigStore:
                 """
             )
             columns = [r["name"] for r in conn.execute("PRAGMA table_info(billing_items)").fetchall()]
+            
+            # V2.0 新增字段
+            if "billing_mode" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN billing_mode TEXT NOT NULL DEFAULT '智能择取'")
+            if "require_business_data" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN require_business_data INTEGER NOT NULL DEFAULT 1")
+            
+            # 旧字段保留用于兼容
             if "category" not in columns:
                 conn.execute("ALTER TABLE billing_items ADD COLUMN category TEXT NOT NULL DEFAULT ''")
             if "billing_note" not in columns:
                 conn.execute("ALTER TABLE billing_items ADD COLUMN billing_note TEXT NOT NULL DEFAULT ''")
+            if "is_enabled_default" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN is_enabled_default INTEGER NOT NULL DEFAULT 1")
+            if "quantity_mode" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN quantity_mode TEXT NOT NULL DEFAULT 'ACTUAL_FULL'")
+            if "min_pick_ratio" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN min_pick_ratio REAL NOT NULL DEFAULT 0")
+            if "max_pick_ratio" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN max_pick_ratio REAL NOT NULL DEFAULT 1")
+            if "pick_priority" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN pick_priority INTEGER NOT NULL DEFAULT 100")
+            if "report_required" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN report_required INTEGER NOT NULL DEFAULT 0")
+            if "tail_balance_eligible" not in columns:
+                conn.execute("ALTER TABLE billing_items ADD COLUMN tail_balance_eligible INTEGER NOT NULL DEFAULT 0")
+            
+            # 数据迁移：将旧 quantity_mode 映射到新 billing_mode
+            conn.execute(
+                """
+                UPDATE billing_items
+                SET billing_mode = CASE
+                    WHEN quantity_mode = 'ACTUAL_FULL' THEN '固定入账'
+                    WHEN quantity_mode = 'ACTUAL_SELECTABLE' THEN '智能择取'
+                    WHEN quantity_mode = 'SIMULATED' THEN '模拟填充'
+                    ELSE '智能择取'
+                END
+                WHERE billing_mode IS NULL OR billing_mode = ''
+                """
+            )
+
+            # 数据修复：历史数据中可能存在 quantity_mode 与 billing_mode 不一致。
+            conn.execute(
+                """
+                UPDATE billing_items
+                SET billing_mode = CASE
+                    WHEN quantity_mode = 'ACTUAL_FULL' THEN '固定入账'
+                    WHEN quantity_mode = 'ACTUAL_SELECTABLE' THEN '智能择取'
+                    WHEN quantity_mode = 'SIMULATED' THEN '模拟填充'
+                    ELSE billing_mode
+                END
+                WHERE quantity_mode IN ('ACTUAL_FULL', 'ACTUAL_SELECTABLE', 'SIMULATED')
+                  AND (
+                        (quantity_mode = 'ACTUAL_FULL' AND billing_mode <> '固定入账')
+                     OR (quantity_mode = 'ACTUAL_SELECTABLE' AND billing_mode <> '智能择取')
+                     OR (quantity_mode = 'SIMULATED' AND billing_mode <> '模拟填充')
+                  )
+                """
+            )
+            
+            # 根据层级设置默认优先级
+            conn.execute(
+                """
+                UPDATE billing_items
+                SET pick_priority = CASE level
+                    WHEN 'L1' THEN 10
+                    WHEN 'L2' THEN 50
+                    WHEN 'L3' THEN 100
+                    WHEN 'L4' THEN 200
+                    ELSE 100
+                END
+                WHERE pick_priority = 100 OR pick_priority IS NULL
+                """
+            )
+            
+            # 将 status 从英文转换为中文
+            conn.execute(
+                """
+                UPDATE billing_items
+                SET status = CASE
+                    WHEN status = 'ACTIVE' THEN '启用'
+                    WHEN status = 'INACTIVE' THEN '停用'
+                    ELSE '启用'
+                END
+                WHERE status IN ('ACTIVE', 'INACTIVE')
+                """
+            )
 
             conn.execute(
                 """
@@ -117,6 +284,11 @@ class ConfigStore:
                     ratio_warning_threshold REAL NOT NULL DEFAULT 0.15,
                     fill_order_json TEXT NOT NULL DEFAULT '["L2","L3","L4"]',
                     strategy_name TEXT NOT NULL DEFAULT 'equal_split_v1',
+                    selection_strategy TEXT NOT NULL DEFAULT 'priority_greedy_v1',
+                    enabled_item_ids_json TEXT NOT NULL DEFAULT '[]',
+                    tail_diff_threshold REAL NOT NULL DEFAULT 0,
+                    fallback_l3_item_id INTEGER,
+                    max_simulation_ratio REAL NOT NULL DEFAULT 1,
                     current_version INTEGER NOT NULL DEFAULT 1,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
@@ -130,6 +302,18 @@ class ConfigStore:
                 conn.execute(
                     "ALTER TABLE allocation_rule_templates ADD COLUMN strategy_name TEXT NOT NULL DEFAULT 'equal_split_v1'"
                 )
+            if "selection_strategy" not in rule_columns:
+                conn.execute(
+                    "ALTER TABLE allocation_rule_templates ADD COLUMN selection_strategy TEXT NOT NULL DEFAULT 'priority_greedy_v1'"
+                )
+            if "enabled_item_ids_json" not in rule_columns:
+                conn.execute("ALTER TABLE allocation_rule_templates ADD COLUMN enabled_item_ids_json TEXT NOT NULL DEFAULT '[]'")
+            if "tail_diff_threshold" not in rule_columns:
+                conn.execute("ALTER TABLE allocation_rule_templates ADD COLUMN tail_diff_threshold REAL NOT NULL DEFAULT 0")
+            if "fallback_l3_item_id" not in rule_columns:
+                conn.execute("ALTER TABLE allocation_rule_templates ADD COLUMN fallback_l3_item_id INTEGER")
+            if "max_simulation_ratio" not in rule_columns:
+                conn.execute("ALTER TABLE allocation_rule_templates ADD COLUMN max_simulation_ratio REAL NOT NULL DEFAULT 1")
             if "current_version" not in rule_columns:
                 conn.execute("ALTER TABLE allocation_rule_templates ADD COLUMN current_version INTEGER NOT NULL DEFAULT 1")
 
@@ -144,11 +328,29 @@ class ConfigStore:
                     ratio_warning_threshold REAL NOT NULL,
                     fill_order_json TEXT NOT NULL,
                     strategy_name TEXT NOT NULL,
+                    selection_strategy TEXT NOT NULL DEFAULT 'priority_greedy_v1',
+                    enabled_item_ids_json TEXT NOT NULL DEFAULT '[]',
+                    tail_diff_threshold REAL NOT NULL DEFAULT 0,
+                    fallback_l3_item_id INTEGER,
+                    max_simulation_ratio REAL NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     UNIQUE(template_name, version)
                 )
                 """
             )
+            rule_version_columns = [r["name"] for r in conn.execute("PRAGMA table_info(allocation_rule_versions)").fetchall()]
+            if "selection_strategy" not in rule_version_columns:
+                conn.execute(
+                    "ALTER TABLE allocation_rule_versions ADD COLUMN selection_strategy TEXT NOT NULL DEFAULT 'priority_greedy_v1'"
+                )
+            if "enabled_item_ids_json" not in rule_version_columns:
+                conn.execute("ALTER TABLE allocation_rule_versions ADD COLUMN enabled_item_ids_json TEXT NOT NULL DEFAULT '[]'")
+            if "tail_diff_threshold" not in rule_version_columns:
+                conn.execute("ALTER TABLE allocation_rule_versions ADD COLUMN tail_diff_threshold REAL NOT NULL DEFAULT 0")
+            if "fallback_l3_item_id" not in rule_version_columns:
+                conn.execute("ALTER TABLE allocation_rule_versions ADD COLUMN fallback_l3_item_id INTEGER")
+            if "max_simulation_ratio" not in rule_version_columns:
+                conn.execute("ALTER TABLE allocation_rule_versions ADD COLUMN max_simulation_ratio REAL NOT NULL DEFAULT 1")
 
             self._ensure_default_rule(conn)
             self._backfill_rule_versions(conn)
@@ -172,11 +374,16 @@ class ConfigStore:
                 ratio_warning_threshold,
                 fill_order_json,
                 strategy_name,
+                selection_strategy,
+                enabled_item_ids_json,
+                tail_diff_threshold,
+                fallback_l3_item_id,
+                max_simulation_ratio,
                 current_version,
                 is_active,
                 created_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
             """,
             (
                 DEFAULT_RULE_TEMPLATE["template_name"],
@@ -185,6 +392,11 @@ class ConfigStore:
                 DEFAULT_RULE_TEMPLATE["ratio_warning_threshold"],
                 json.dumps(DEFAULT_RULE_TEMPLATE["fill_order"], ensure_ascii=False),
                 DEFAULT_RULE_TEMPLATE["strategy_name"],
+                DEFAULT_RULE_TEMPLATE["selection_strategy"],
+                json.dumps(DEFAULT_RULE_TEMPLATE["enabled_item_ids"], ensure_ascii=False),
+                DEFAULT_RULE_TEMPLATE["tail_diff_threshold"],
+                DEFAULT_RULE_TEMPLATE["fallback_l3_item_id"],
+                DEFAULT_RULE_TEMPLATE["max_simulation_ratio"],
                 DEFAULT_RULE_TEMPLATE["version"],
                 now,
                 now,
@@ -195,7 +407,8 @@ class ConfigStore:
         rows = conn.execute(
             """
             SELECT template_name, ratios_json, l4_max_ratio, ratio_warning_threshold,
-                   fill_order_json, strategy_name, current_version, created_at
+                   fill_order_json, strategy_name, selection_strategy, enabled_item_ids_json,
+                   tail_diff_threshold, fallback_l3_item_id, max_simulation_ratio, current_version, created_at
             FROM allocation_rule_templates
             """
         ).fetchall()
@@ -212,8 +425,10 @@ class ConfigStore:
                     """
                     INSERT INTO allocation_rule_versions (
                         template_name, version, ratios_json, l4_max_ratio,
-                        ratio_warning_threshold, fill_order_json, strategy_name, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ratio_warning_threshold, fill_order_json, strategy_name,
+                        selection_strategy, enabled_item_ids_json, tail_diff_threshold,
+                        fallback_l3_item_id, max_simulation_ratio, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         template_name,
@@ -223,6 +438,11 @@ class ConfigStore:
                         float(row["ratio_warning_threshold"]),
                         row["fill_order_json"],
                         str(row["strategy_name"] or "equal_split_v1"),
+                        str(row["selection_strategy"] or "priority_greedy_v1"),
+                        str(row["enabled_item_ids_json"] or "[]"),
+                        float(row["tail_diff_threshold"] or 0.0),
+                        int(row["fallback_l3_item_id"]) if row["fallback_l3_item_id"] is not None else None,
+                        float(row["max_simulation_ratio"] or 1.0),
                         str(row["created_at"] or _now_iso()),
                     ),
                 )
@@ -238,63 +458,147 @@ class ConfigStore:
                     (int(max_version), _now_iso(), template_name),
                 )
 
+    def _normalize_billing_item_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row or {})
+        item_id = _safe_int(item.get("id"), 0)
+
+        level = _safe_text(item.get("level"), "").upper()
+        if level not in VALID_LEVELS:
+            level = "L3"
+        item["level"] = level
+
+        item["name"] = _safe_text(item.get("name"), f"未命名计费项-{item_id or 'NEW'}")
+        item["unit"] = _safe_text(item.get("unit"), "元/次")
+        item["category"] = _safe_text(item.get("category"), "")
+        item["billing_note"] = _safe_text(item.get("billing_note"), "")
+        item["code"] = _safe_text(item.get("code"), "") or None
+
+        item["price"] = _safe_float(item.get("price"), 0.0)
+        item["sort_order"] = _safe_int(item.get("sort_order"), 0)
+        item["pick_priority"] = _safe_int(
+            item.get("pick_priority"),
+            {"L1": 10, "L2": 50, "L3": 100, "L4": 200}.get(level, 100),
+        )
+
+        item["is_existing"] = bool(_to_int_flag(item.get("is_existing", False)))
+        item["can_simulate"] = bool(_to_int_flag(item.get("can_simulate", False)))
+        item["must_use"] = bool(_to_int_flag(item.get("must_use", False)))
+        item["is_enabled_default"] = bool(_to_int_flag(item.get("is_enabled_default", True), default=1))
+        item["report_required"] = bool(_to_int_flag(item.get("report_required", False)))
+        item["tail_balance_eligible"] = bool(_to_int_flag(item.get("tail_balance_eligible", False)))
+        item["allow_discount"] = bool(_to_int_flag(item.get("allow_discount", False)))
+        item["require_business_data"] = bool(_to_int_flag(item.get("require_business_data", True), default=1))
+
+        item["status"] = _normalize_status(item.get("status"))
+
+        quantity_mode = _safe_text(item.get("quantity_mode"), "").upper()
+        if quantity_mode not in VALID_QUANTITY_MODES:
+            quantity_mode = _derive_quantity_mode(item)
+        item["quantity_mode"] = quantity_mode
+
+        item["billing_mode"] = _derive_billing_mode(item)
+        if item["billing_mode"] not in VALID_BILLING_MODES:
+            item["billing_mode"] = "智能择取"
+
+        min_pick = max(0.0, min(_safe_float(item.get("min_pick_ratio"), 0.0), 1.0))
+        max_pick = max(0.0, min(_safe_float(item.get("max_pick_ratio"), 1.0), 1.0))
+        if min_pick > max_pick:
+            min_pick, max_pick = max_pick, min_pick
+        item["min_pick_ratio"] = min_pick
+        item["max_pick_ratio"] = max_pick
+
+        item["effective_from"] = _safe_text(item.get("effective_from"), "") or None
+        item["effective_to"] = _safe_text(item.get("effective_to"), "") or None
+        item["created_at"] = _safe_text(item.get("created_at"), _now_iso())
+        item["updated_at"] = _safe_text(item.get("updated_at"), item["created_at"])
+        if item_id:
+            item["id"] = item_id
+        return item
+
     def list_billing_items(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
         query = "SELECT * FROM billing_items"
         params: List[Any] = []
         if not include_inactive:
-            query += " WHERE status = ?"
-            params.append("ACTIVE")
+            query += " WHERE status IN (?, ?, '') OR status IS NULL"
+            params.extend(["启用", "ACTIVE"])
         query += " ORDER BY level, sort_order, id"
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        return [self._normalize_billing_item_row(dict(r)) for r in rows]
 
-    def create_billing_item(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def create_billing_item(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         now = _now_iso()
+        normalized_payload = self._normalize_billing_item_row({**payload, "created_at": now, "updated_at": now})
+
+        # 根据层级设置默认优先级
+        level = normalized_payload.get("level", "L3")
+        default_priority = {"L1": 10, "L2": 50, "L3": 100, "L4": 200}.get(level, 100)
+        
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO billing_items (
-                    code, name, level, category, unit, price, is_existing, can_simulate, must_use,
-                    allow_discount, status, sort_order, effective_from,
+                    code, name, level, category, unit, price, billing_mode, pick_priority, require_business_data,
+                    is_existing, can_simulate, must_use, is_enabled_default, quantity_mode, min_pick_ratio, max_pick_ratio,
+                    report_required, tail_balance_eligible, allow_discount, status, sort_order, effective_from,
                     effective_to, billing_note, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    payload.get("code"),
-                    payload["name"],
-                    payload["level"],
-                    payload.get("category", ""),
-                    payload["unit"],
-                    payload["price"],
-                    int(payload.get("is_existing", False)),
-                    int(payload.get("can_simulate", False)),
-                    int(payload.get("must_use", False)),
-                    int(payload.get("allow_discount", False)),
-                    payload.get("status", "ACTIVE"),
-                    payload.get("sort_order", 0),
-                    payload.get("effective_from"),
-                    payload.get("effective_to"),
-                    payload.get("billing_note", ""),
+                    normalized_payload.get("code"),
+                    normalized_payload["name"],
+                    level,
+                    normalized_payload.get("category", ""),
+                    normalized_payload["unit"],
+                    normalized_payload["price"],
+                    normalized_payload.get("billing_mode", "智能择取"),  # V2.0 新字段
+                    int(normalized_payload.get("pick_priority", default_priority) or default_priority),  # V2.0 新字段
+                    _to_int_flag(normalized_payload.get("require_business_data", True)),  # V2.0 新字段
+                    # 旧字段保留用于兼容
+                    int(normalized_payload.get("is_existing", False)),
+                    _to_int_flag(normalized_payload.get("can_simulate", False)),
+                    _to_int_flag(normalized_payload.get("must_use", False)),
+                    _to_int_flag(normalized_payload.get("is_enabled_default", True), default=1),
+                    _derive_quantity_mode(normalized_payload),
+                    float(normalized_payload.get("min_pick_ratio", 0.0) or 0.0),
+                    float(normalized_payload.get("max_pick_ratio", 1.0) or 1.0),
+                    _to_int_flag(normalized_payload.get("report_required", False)),
+                    _to_int_flag(normalized_payload.get("tail_balance_eligible", False)),
+                    int(normalized_payload.get("allow_discount", False)),
+                    _normalize_status(normalized_payload.get("status", "启用")),
+                    normalized_payload.get("sort_order", 0),
+                    normalized_payload.get("effective_from"),
+                    normalized_payload.get("effective_to"),
+                    normalized_payload.get("billing_note", ""),
                     now,
                     now,
                 ),
             )
             item_id = cursor.lastrowid
             conn.commit()
+        if item_id is None:
+            return None
+        # 类型断言：item_id 在成功插入后不会是 None
+        assert item_id is not None
         return self.get_billing_item(item_id)
 
     def get_billing_item(self, item_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM billing_items WHERE id = ?", (item_id,)).fetchone()
-        return dict(row) if row else None
+        return self._normalize_billing_item_row(dict(row)) if row else None
 
     def update_billing_item(self, item_id: int, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         existing = self.get_billing_item(item_id)
         if not existing:
             return None
 
-        merged = {**existing, **payload, "updated_at": _now_iso()}
+        merged = self._normalize_billing_item_row({**existing, **payload, "updated_at": _now_iso()})
+        merged["quantity_mode"] = _derive_quantity_mode(merged)
+        
+        # 确保 billing_mode 有值
+        if not merged.get("billing_mode"):
+            merged["billing_mode"] = "智能择取"
+        
         values = [
             merged["code"],
             merged["name"],
@@ -302,11 +606,21 @@ class ConfigStore:
             merged.get("category", ""),
             merged["unit"],
             merged["price"],
+            merged.get("billing_mode", "智能择取"),  # V2.0 新字段
+            int(merged.get("pick_priority", 100) or 100),  # V2.0 新字段
+            _to_int_flag(merged.get("require_business_data", True)),  # V2.0 新字段
+            # 旧字段保留用于兼容
             int(bool(merged["is_existing"])),
-            int(bool(merged["can_simulate"])),
-            int(bool(merged["must_use"])),
+            _to_int_flag(merged["can_simulate"]),
+            _to_int_flag(merged["must_use"]),
+            _to_int_flag(merged.get("is_enabled_default", True), default=1),
+            merged["quantity_mode"],
+            float(merged.get("min_pick_ratio", 0.0) or 0.0),
+            float(merged.get("max_pick_ratio", 1.0) or 1.0),
+            _to_int_flag(merged.get("report_required", False)),
+            _to_int_flag(merged.get("tail_balance_eligible", False)),
             int(bool(merged["allow_discount"])),
-            merged["status"],
+            _normalize_status(merged["status"]),
             merged["sort_order"],
             merged["effective_from"],
             merged["effective_to"],
@@ -318,9 +632,11 @@ class ConfigStore:
             conn.execute(
                 """
                 UPDATE billing_items
-                SET code = ?, name = ?, level = ?, category = ?, unit = ?, price = ?, is_existing = ?,
-                    can_simulate = ?, must_use = ?, allow_discount = ?,
-                    status = ?, sort_order = ?, effective_from = ?, effective_to = ?, billing_note = ?, updated_at = ?
+                SET code = ?, name = ?, level = ?, category = ?, unit = ?, price = ?, billing_mode = ?,
+                    pick_priority = ?, require_business_data = ?, is_existing = ?, can_simulate = ?, must_use = ?,
+                    is_enabled_default = ?, quantity_mode = ?, min_pick_ratio = ?, max_pick_ratio = ?,
+                    report_required = ?, tail_balance_eligible = ?, allow_discount = ?, status = ?, sort_order = ?,
+                    effective_from = ?, effective_to = ?, billing_note = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 values,
@@ -329,7 +645,66 @@ class ConfigStore:
         return self.get_billing_item(item_id)
 
     def deactivate_billing_item(self, item_id: int) -> Optional[Dict[str, Any]]:
-        return self.update_billing_item(item_id, {"status": "INACTIVE"})
+        """停用计费项（中文状态）"""
+        return self.update_billing_item(item_id, {"status": "停用"})
+
+    def activate_billing_item(self, item_id: int) -> Optional[Dict[str, Any]]:
+        """启用计费项（中文状态）"""
+        return self.update_billing_item(item_id, {"status": "启用"})
+
+    def delete_billing_item(self, item_id: int) -> bool:
+        """物理删除计费项"""
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM billing_items WHERE id = ?", (item_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def batch_update_billing_items(self, item_ids: List[int], updates: Dict[str, Any]) -> int:
+        """批量更新计费项"""
+        if not item_ids:
+            return 0
+        
+        # 构建更新字段
+        allowed_fields = {"billing_mode", "pick_priority", "require_business_data", "status", "price", "unit", "billing_note"}
+        update_fields = {k: v for k, v in updates.items() if k in allowed_fields}
+        
+        if not update_fields:
+            return 0
+        
+        set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys()])
+        values = list(update_fields.values())
+        values.append(_now_iso())  # updated_at
+        
+        # 构建IN子句
+        placeholders = ", ".join(["?"] * len(item_ids))
+        values.extend(item_ids)
+        
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE billing_items
+                SET {set_clause}, updated_at = ?
+                WHERE id IN ({placeholders})
+                """,
+                values,
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def batch_delete_billing_items(self, item_ids: List[int]) -> int:
+        """批量物理删除计费项"""
+        if not item_ids:
+            return 0
+        
+        placeholders = ", ".join(["?"] * len(item_ids))
+        
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"DELETE FROM billing_items WHERE id IN ({placeholders})",
+                item_ids,
+            )
+            conn.commit()
+            return cursor.rowcount
 
     def seed_billing_items(self, items: List[Dict[str, Any]]) -> None:
         with self._connect() as conn:
@@ -342,9 +717,11 @@ class ConfigStore:
                     """
                     INSERT INTO billing_items (
                         code, name, level, category, unit, price, is_existing, can_simulate, must_use,
+                        is_enabled_default, quantity_mode, min_pick_ratio, max_pick_ratio, pick_priority,
+                        report_required, tail_balance_eligible,
                         allow_discount, status, sort_order, effective_from,
                         effective_to, billing_note, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item.get("code"),
@@ -354,8 +731,15 @@ class ConfigStore:
                         item["unit"],
                         item["price"],
                         int(item.get("is_existing", False)),
-                        int(item.get("can_simulate", False)),
-                        int(item.get("must_use", False)),
+                        _to_int_flag(item.get("can_simulate", False)),
+                        _to_int_flag(item.get("must_use", False)),
+                        _to_int_flag(item.get("is_enabled_default", True), default=1),
+                        _derive_quantity_mode(item),
+                        float(item.get("min_pick_ratio", 0.0) or 0.0),
+                        float(item.get("max_pick_ratio", 1.0) or 1.0),
+                        int(item.get("pick_priority", 100) or 100),
+                        _to_int_flag(item.get("report_required", False)),
+                        _to_int_flag(item.get("tail_balance_eligible", False)),
                         int(item.get("allow_discount", False)),
                         item.get("status", "ACTIVE"),
                         item.get("sort_order", idx),
@@ -406,16 +790,15 @@ class ConfigStore:
             cursor = conn.execute(
                 """
                 INSERT INTO statement_data_sources (
-                    statement_id, source_type, source_name, period, no_data_reason,
+                    statement_id, source_type, source_name, period,
                     rows_total, rows_used, matched_columns, unmatched_columns, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload.get("statement_id"),
                     payload["source_type"],
                     payload.get("source_name"),
                     payload.get("period"),
-                    payload.get("no_data_reason"),
                     int(payload.get("rows_total", 0)),
                     int(payload.get("rows_used", 0)),
                     int(payload.get("matched_columns", 0)),
@@ -433,7 +816,13 @@ class ConfigStore:
     def list_statement_sources(self, statement_id: str) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM statement_data_sources WHERE statement_id = ? ORDER BY id DESC",
+                """
+                SELECT id, statement_id, source_type, source_name, period,
+                       rows_total, rows_used, matched_columns, unmatched_columns, created_at
+                FROM statement_data_sources
+                WHERE statement_id = ?
+                ORDER BY id DESC
+                """,
                 (statement_id,),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -513,6 +902,30 @@ class ConfigStore:
         strategy_name = str(data.get("strategy_name") or DEFAULT_RULE_TEMPLATE["strategy_name"]).strip() or DEFAULT_RULE_TEMPLATE["strategy_name"]
         if strategy_name not in {x["key"] for x in ALLOCATION_STRATEGIES}:
             strategy_name = DEFAULT_RULE_TEMPLATE["strategy_name"]
+        selection_strategy = str(data.get("selection_strategy") or DEFAULT_RULE_TEMPLATE["selection_strategy"]).strip() or DEFAULT_RULE_TEMPLATE["selection_strategy"]
+        if selection_strategy not in {x["key"] for x in ALLOCATION_STRATEGIES}:
+            selection_strategy = DEFAULT_RULE_TEMPLATE["selection_strategy"]
+        raw_enabled = data.get("enabled_item_ids") or DEFAULT_RULE_TEMPLATE["enabled_item_ids"]
+        enabled_item_ids: List[int] = []
+        for item_id in raw_enabled:
+            try:
+                enabled_item_ids.append(int(item_id))
+            except Exception:
+                continue
+        try:
+            tail_diff_threshold = float(data.get("tail_diff_threshold", DEFAULT_RULE_TEMPLATE["tail_diff_threshold"]))
+        except Exception:
+            tail_diff_threshold = float(DEFAULT_RULE_TEMPLATE["tail_diff_threshold"])
+        fallback_l3_item_id = data.get("fallback_l3_item_id")
+        try:
+            fallback_l3_item_id = int(fallback_l3_item_id) if fallback_l3_item_id is not None else None
+        except Exception:
+            fallback_l3_item_id = None
+        try:
+            max_simulation_ratio = float(data.get("max_simulation_ratio", DEFAULT_RULE_TEMPLATE["max_simulation_ratio"]))
+        except Exception:
+            max_simulation_ratio = float(DEFAULT_RULE_TEMPLATE["max_simulation_ratio"])
+        max_simulation_ratio = max(0.0, min(max_simulation_ratio, 1.0))
 
         return {
             "template_name": template_name,
@@ -521,6 +934,11 @@ class ConfigStore:
             "ratio_warning_threshold": ratio_warning_threshold,
             "fill_order": fill_order,
             "strategy_name": strategy_name,
+            "selection_strategy": selection_strategy,
+            "enabled_item_ids": enabled_item_ids,
+            "tail_diff_threshold": max(tail_diff_threshold, 0.0),
+            "fallback_l3_item_id": fallback_l3_item_id,
+            "max_simulation_ratio": max_simulation_ratio,
         }
 
     def get_allocation_rule(self, template_name: str = "standard") -> Dict[str, Any]:
@@ -528,7 +946,8 @@ class ConfigStore:
             row = conn.execute(
                 """
                 SELECT template_name, ratios_json, l4_max_ratio, ratio_warning_threshold,
-                       fill_order_json, strategy_name, current_version
+                       fill_order_json, strategy_name, selection_strategy, enabled_item_ids_json,
+                       tail_diff_threshold, fallback_l3_item_id, max_simulation_ratio, current_version
                 FROM allocation_rule_templates
                 WHERE template_name = ? AND is_active = 1
                 """,
@@ -545,6 +964,11 @@ class ConfigStore:
             "ratio_warning_threshold": float(row["ratio_warning_threshold"]),
             "fill_order": json.loads(row["fill_order_json"]),
             "strategy_name": str(row["strategy_name"] or DEFAULT_RULE_TEMPLATE["strategy_name"]),
+            "selection_strategy": str(row["selection_strategy"] or DEFAULT_RULE_TEMPLATE["selection_strategy"]),
+            "enabled_item_ids": json.loads(row["enabled_item_ids_json"] or "[]"),
+            "tail_diff_threshold": float(row["tail_diff_threshold"] or 0.0),
+            "fallback_l3_item_id": int(row["fallback_l3_item_id"]) if row["fallback_l3_item_id"] is not None else None,
+            "max_simulation_ratio": float(row["max_simulation_ratio"] or 1.0),
             "version": int(row["current_version"] or 1),
         }
 
@@ -554,7 +978,9 @@ class ConfigStore:
             rows = conn.execute(
                 """
                 SELECT template_name, version, ratios_json, l4_max_ratio,
-                       ratio_warning_threshold, fill_order_json, strategy_name, created_at
+                       ratio_warning_threshold, fill_order_json, strategy_name,
+                       selection_strategy, enabled_item_ids_json, tail_diff_threshold,
+                       fallback_l3_item_id, max_simulation_ratio, created_at
                 FROM allocation_rule_versions
                 WHERE template_name = ?
                 ORDER BY version DESC
@@ -574,6 +1000,11 @@ class ConfigStore:
                     "ratio_warning_threshold": float(row["ratio_warning_threshold"]),
                     "fill_order": json.loads(row["fill_order_json"]),
                     "strategy_name": str(row["strategy_name"]),
+                    "selection_strategy": str(row["selection_strategy"] or DEFAULT_RULE_TEMPLATE["selection_strategy"]),
+                    "enabled_item_ids": json.loads(row["enabled_item_ids_json"] or "[]"),
+                    "tail_diff_threshold": float(row["tail_diff_threshold"] or 0.0),
+                    "fallback_l3_item_id": int(row["fallback_l3_item_id"]) if row["fallback_l3_item_id"] is not None else None,
+                    "max_simulation_ratio": float(row["max_simulation_ratio"] or 1.0),
                     "created_at": str(row["created_at"]),
                 }
             )
@@ -595,8 +1026,10 @@ class ConfigStore:
                 """
                 INSERT INTO allocation_rule_templates (
                     template_name, ratios_json, l4_max_ratio, ratio_warning_threshold,
-                    fill_order_json, strategy_name, current_version, is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    fill_order_json, strategy_name, selection_strategy, enabled_item_ids_json,
+                    tail_diff_threshold, fallback_l3_item_id, max_simulation_ratio,
+                    current_version, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(template_name)
                 DO UPDATE SET
                     ratios_json = excluded.ratios_json,
@@ -604,6 +1037,11 @@ class ConfigStore:
                     ratio_warning_threshold = excluded.ratio_warning_threshold,
                     fill_order_json = excluded.fill_order_json,
                     strategy_name = excluded.strategy_name,
+                    selection_strategy = excluded.selection_strategy,
+                    enabled_item_ids_json = excluded.enabled_item_ids_json,
+                    tail_diff_threshold = excluded.tail_diff_threshold,
+                    fallback_l3_item_id = excluded.fallback_l3_item_id,
+                    max_simulation_ratio = excluded.max_simulation_ratio,
                     current_version = excluded.current_version,
                     is_active = 1,
                     updated_at = excluded.updated_at
@@ -615,6 +1053,11 @@ class ConfigStore:
                     data["ratio_warning_threshold"],
                     json.dumps(data["fill_order"], ensure_ascii=False),
                     data["strategy_name"],
+                    data["selection_strategy"],
+                    json.dumps(data["enabled_item_ids"], ensure_ascii=False),
+                    data["tail_diff_threshold"],
+                    data["fallback_l3_item_id"],
+                    data["max_simulation_ratio"],
                     next_version,
                     created_at,
                     now,
@@ -624,8 +1067,10 @@ class ConfigStore:
                 """
                 INSERT INTO allocation_rule_versions (
                     template_name, version, ratios_json, l4_max_ratio,
-                    ratio_warning_threshold, fill_order_json, strategy_name, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ratio_warning_threshold, fill_order_json, strategy_name,
+                    selection_strategy, enabled_item_ids_json, tail_diff_threshold,
+                    fallback_l3_item_id, max_simulation_ratio, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data["template_name"],
@@ -635,6 +1080,11 @@ class ConfigStore:
                     data["ratio_warning_threshold"],
                     json.dumps(data["fill_order"], ensure_ascii=False),
                     data["strategy_name"],
+                    data["selection_strategy"],
+                    json.dumps(data["enabled_item_ids"], ensure_ascii=False),
+                    data["tail_diff_threshold"],
+                    data["fallback_l3_item_id"],
+                    data["max_simulation_ratio"],
                     now,
                 ),
             )

@@ -1,0 +1,9 @@
+business_file=/Users/lee/Documents/beiyi/duizhangdanxitong/PRD/测试业务使用数据.xlsx
+period=2025-04
+line_recalc_rows=26
+line_recalc_total_amount=84480.00
+target_scan_range=50000-50030
+target_scan_rows=31
+target_scan_exceeds_1.00=26
+line_csv=/Users/lee/Documents/beiyi/duizhangdanxitong/analysis/tail_diff_line_recalc.csv
+scan_csv=/Users/lee/Documents/beiyi/duizhangdanxitong/analysis/tail_diff_target_scan.csv
