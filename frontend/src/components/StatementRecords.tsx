@@ -48,6 +48,8 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<Statement[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [batchExporting, setBatchExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const { message } = App.useApp();
   
   // Filters
@@ -186,13 +188,77 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
     },
   ];
 
-  const handleBatchExport = () => {
+  const handleBatchExport = async () => {
     if (selectedRowKeys.length === 0) {
       message.warning('请选择要导出的记录');
       return;
     }
-    message.success(`正在导出 ${selectedRowKeys.length} 条记录`);
-    // Implement actual export logic here
+
+    setBatchExporting(true);
+    setExportProgress(0);
+    const zip = new JSZip();
+    const total = selectedRowKeys.length;
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      for (let i = 0; i < selectedRowKeys.length; i++) {
+        const id = selectedRowKeys[i] as string;
+        const record = data.find((item) => item.id === id);
+
+        try {
+          const res = await axios.post(
+            apiUrl(`/statements/${id}/export`),
+            {},
+            { responseType: 'blob' }
+          );
+
+          const blob = new Blob([res.data], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+
+          const fileName = record
+            ? `Statement of Account_${record.customer_name}_${record.statement_date}.xlsx`
+            : `Statement_${id}.xlsx`;
+
+          zip.file(fileName, blob);
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to export statement ${id}:`, error);
+          failCount++;
+        }
+
+        setExportProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      if (successCount === 0) {
+        message.error('所有导出请求均失败，请检查网络或服务器状态');
+        return;
+      }
+
+      const zipBlob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
+
+      const timestamp = dayjs().format('YYYYMMDD_HHmmss');
+      saveAs(zipBlob, `Statements_Batch_Export_${timestamp}.zip`);
+
+      if (failCount > 0) {
+        message.warning(`导出完成: ${successCount} 成功, ${failCount} 失败`);
+      } else {
+        message.success(`成功导出 ${successCount} 条对账单`);
+      }
+
+      setSelectedRowKeys([]);
+    } catch (error) {
+      console.error('Batch export failed:', error);
+      message.error('批量导出失败');
+    } finally {
+      setBatchExporting(false);
+      setExportProgress(0);
+    }
   };
 
   return (
@@ -206,11 +272,23 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
             allowClear
             onChange={e => { if(!e.target.value) setSearchText('') }}
           />
-          <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={loadData} disabled={batchExporting}>刷新</Button>
         </FilterGroup>
         <Space>
-          <Button icon={<ExportOutlined />} onClick={handleBatchExport}>批量导出</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>新建对账单</Button>
+          {batchExporting ? (
+            <div style={{ width: 200 }}>
+              <Progress percent={exportProgress} size="small" status="active" />
+            </div>
+          ) : (
+            <Button 
+              icon={<ExportOutlined />} 
+              onClick={handleBatchExport}
+              disabled={selectedRowKeys.length === 0}
+            >
+              批量导出 {selectedRowKeys.length > 0 && `(${selectedRowKeys.length})`}
+            </Button>
+          )}
+          <Button type="primary" icon={<PlusOutlined />} onClick={onCreate} disabled={batchExporting}>新建对账单</Button>
         </Space>
       </Toolbar>
       
@@ -224,6 +302,9 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
           rowSelection={{
             selectedRowKeys,
             onChange: setSelectedRowKeys,
+            getCheckboxProps: () => ({
+              disabled: batchExporting,
+            }),
           }}
           pagination={{
             defaultPageSize: 20,
