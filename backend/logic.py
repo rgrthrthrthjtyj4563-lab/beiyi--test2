@@ -167,31 +167,11 @@ def load_config() -> List[BillingItem]:
 
 
 def load_config_seed_payload() -> List[Dict]:
-    # 定义默认的回退数据，以防配置文件丢失
-    fallback_items = [
-        {"level": "L1", "name": "租户基础服务费", "unit": "元/月", "price": 2000.0, "quantity_mode": "ACTUAL_FULL", "must_use": True, "category": "基础服务"},
-        {"level": "L1", "name": "API调用服务包", "unit": "千次", "price": 50.0, "quantity_mode": "ACTUAL_SELECTABLE", "can_simulate": False, "category": "增值服务"},
-        {"level": "L1", "name": "数据存储扩容", "unit": "GB/月", "price": 1.0, "quantity_mode": "ACTUAL_SELECTABLE", "can_simulate": False, "category": "增值服务"},
-        
-        {"level": "L2", "name": "标准报告生成费", "unit": "份", "price": 50.0, "quantity_mode": "SIMULATED", "can_simulate": True, "category": "报告服务"},
-        {"level": "L2", "name": "定制化报表开发", "unit": "人天", "price": 3000.0, "quantity_mode": "SIMULATED", "can_simulate": True, "category": "报告服务"},
-        
-        {"level": "L3", "name": "增值服务费", "unit": "次", "price": 100.0, "quantity_mode": "SIMULATED", "can_simulate": True, "category": "咨询服务"},
-        {"level": "L3", "name": "专家咨询工时", "unit": "小时", "price": 800.0, "quantity_mode": "SIMULATED", "can_simulate": True, "category": "咨询服务"},
-        
-        {"level": "L4", "name": "其他费用", "unit": "项", "price": 10.0, "quantity_mode": "SIMULATED", "can_simulate": True, "tail_balance_eligible": True, "category": "其他"},
-        {"level": "L4", "name": "零星调整", "unit": "元", "price": 1.0, "quantity_mode": "SIMULATED", "can_simulate": True, "tail_balance_eligible": True, "category": "其他"},
-    ]
-
     try:
-        if not CONFIG_PATH.exists():
-            print(f"Config file not found at: {CONFIG_PATH}. Using fallback items.")
-            return fallback_items
-            
         df = pd.read_excel(CONFIG_PATH)
     except Exception as e:
-        print(f"Error loading config: {e}. Using fallback items.")
-        return fallback_items
+        print(f"Error loading config: {e}")
+        return []
 
     items = []
     for _, row in df.iterrows():

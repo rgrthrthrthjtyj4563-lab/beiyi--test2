@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build && cd .. && mkdir -p public && cp -r frontend/dist/* public/"
+  },
   "dependencies": {
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1"
