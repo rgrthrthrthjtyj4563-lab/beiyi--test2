@@ -18,6 +18,9 @@ DEFAULT_RATIOS = {"L1": 0.55, "L2": 0.30, "L3": 0.10, "L4": 0.05}
 DEFAULT_FILL_ORDER = ["L2", "L3", "L4"]
 DEFAULT_STRATEGY = "equal_split_v1"
 DEFAULT_SELECTION_STRATEGY = "priority_greedy_v1"
+AMOUNT_STEP_YUAN = 10.0
+AMOUNT_STEP_FEN = 1000
+L1_DISCOUNT_NOTE = "月度商议数据折让条数（不提供且无法提供协商细节）"
 
 
 def _normalize_level(raw_level: str) -> str:
@@ -108,6 +111,41 @@ def _normalize_qty(raw_qty: float, allow_decimal: bool = False) -> float:
     if allow_decimal:
         return max(qty, 0.0)
     return float(max(math.floor(qty), 0))
+
+
+def _to_fen(amount: float) -> int:
+    return int(round(_safe_float(amount, 0.0) * 100))
+
+
+def _amount_is_step_multiple(amount: float, step_fen: int = AMOUNT_STEP_FEN) -> bool:
+    fen = _to_fen(amount)
+    return fen >= 0 and fen % max(step_fen, 1) == 0
+
+
+def _normalize_target_amount(target_amount: float) -> float:
+    target = max(_safe_float(target_amount, 0.0), 0.0)
+    normalized = math.floor(target / AMOUNT_STEP_YUAN) * AMOUNT_STEP_YUAN
+    return round(normalized, 2)
+
+
+def _quantity_step_for_amount(price: float) -> int:
+    price_fen = _to_fen(price)
+    if price_fen <= 0:
+        return 1
+    return max(1, AMOUNT_STEP_FEN // math.gcd(AMOUNT_STEP_FEN, price_fen))
+
+
+def _align_qty_down(qty: int, step: int) -> int:
+    if step <= 1:
+        return max(qty, 0)
+    return max((max(qty, 0) // step) * step, 0)
+
+
+def _align_qty_up(qty: int, step: int) -> int:
+    if step <= 1:
+        return max(qty, 0)
+    q = max(qty, 0)
+    return ((q + step - 1) // step) * step
 
 
 def get_allocation_strategies() -> List[Dict[str, str]]:
@@ -434,9 +472,12 @@ class _SelectableEntry:
     def __init__(self, item: BillingItem, actual_qty: int):
         self.item = item
         self.actual_qty = max(actual_qty, 0)
+        self.qty_step = _quantity_step_for_amount(item.price)
         mn_ratio, mx_ratio = _normalize_ratio_range(item.min_pick_ratio, item.max_pick_ratio)
-        self.min_qty = min(max(int(math.ceil(self.actual_qty * mn_ratio)), 0), self.actual_qty)
-        self.max_qty = min(max(int(math.floor(self.actual_qty * mx_ratio)), 0), self.actual_qty)
+        min_qty_raw = min(max(int(math.ceil(self.actual_qty * mn_ratio)), 0), self.actual_qty)
+        max_qty_raw = min(max(int(math.floor(self.actual_qty * mx_ratio)), 0), self.actual_qty)
+        self.min_qty = min(_align_qty_up(min_qty_raw, self.qty_step), self.actual_qty)
+        self.max_qty = min(_align_qty_down(max_qty_raw, self.qty_step), self.actual_qty)
         if self.max_qty < self.min_qty:
             self.min_qty = self.max_qty
         self.qty = self.min_qty
@@ -485,26 +526,37 @@ def _bounded_backtracking(entries: List[_SelectableEntry], target_delta: float) 
         if entry.item.price <= 0:
             dfs(idx + 1, remaining)
             return
-        max_add = entry.remaining_capacity
-        if max_add <= 0:
+        qty_step = max(entry.qty_step, 1)
+        max_add_units = entry.remaining_capacity // qty_step
+        if max_add_units <= 0:
             dfs(idx + 1, remaining)
             return
 
         # Enforce non-overshoot: selectable phase should not exceed target.
-        max_add_by_remaining = int(max(0, math.floor((remaining + 1e-9) / entry.item.price)))
-        max_add = min(max_add, max_add_by_remaining)
-        if max_add <= 0:
+        step_amount = qty_step * entry.item.price
+        max_add_by_remaining_units = int(max(0, math.floor((remaining + 1e-9) / step_amount)))
+        max_add_units = min(max_add_units, max_add_by_remaining_units)
+        if max_add_units <= 0:
             dfs(idx + 1, remaining)
             return
 
-        approx = int(max(0, min(max_add, math.floor(remaining / entry.item.price))))
-        candidates = [approx, max_add, 0, approx - 1, approx + 1, approx - 2, approx + 2]
+        approx_units = int(max(0, min(max_add_units, math.floor(remaining / step_amount))))
+        candidates = [
+            approx_units,
+            max_add_units,
+            0,
+            approx_units - 1,
+            approx_units + 1,
+            approx_units - 2,
+            approx_units + 2,
+        ]
         tried = set()
-        for add in candidates:
-            add = max(0, min(max_add, add))
-            if add in tried:
+        for units in candidates:
+            units = max(0, min(max_add_units, units))
+            if units in tried:
                 continue
-            tried.add(add)
+            tried.add(units)
+            add = units * qty_step
             old = entry.qty
             entry.qty = old + add
             dfs(idx + 1, remaining - add * entry.item.price)
@@ -539,12 +591,16 @@ def _select_actual_quantities(entries: List[_SelectableEntry], target_amount: fl
     remaining = max(target_amount - current, 0.0)
 
     while remaining > 0.01:
-        fit = [e for e in ranked if e.remaining_capacity > 0 and e.item.price <= remaining + 1e-9]
+        fit = [
+            e
+            for e in ranked
+            if e.remaining_capacity >= e.qty_step and (e.item.price * e.qty_step) <= remaining + 1e-9
+        ]
         if not fit:
             break
         picked = fit[0]
-        picked.qty += 1
-        current += picked.item.price
+        picked.qty += picked.qty_step
+        current += picked.item.price * picked.qty_step
         remaining = max(target_amount - current, 0.0)
 
     if remaining > 0.01:
@@ -585,7 +641,9 @@ def _allocate_simulation(
                 break
             if item.price <= 0:
                 continue
+            qty_step = _quantity_step_for_amount(item.price)
             qty = int(math.floor(diff / item.price))
+            qty = _align_qty_down(qty, qty_step)
             if qty <= 0:
                 continue
             amount = qty * item.price
@@ -629,11 +687,18 @@ def _build_item(
     allow_decimal: bool = False,
 ) -> Optional[StatementItem]:
     qty = _normalize_qty(billed_qty, allow_decimal=allow_decimal)
+    if not allow_decimal:
+        qty = float(_align_qty_down(int(qty), _quantity_step_for_amount(item.price)))
     if qty <= 0 and abs(qty) <= 1e-9:
         return None
-    amount = qty * item.price
+    amount = round(qty * item.price, 2)
     actual = _normalize_qty(actual_qty, allow_decimal=False)
     unbilled = max(actual - _normalize_qty(qty, allow_decimal=False), 0.0)
+    resolved_reason_code = reason_code
+    resolved_note = item.billing_note
+    if item.level == "L1" and item.quantity_mode == "ACTUAL_SELECTABLE" and unbilled > 0:
+        resolved_reason_code = "MONTHLY_NEGOTIATED_DISCOUNT"
+        resolved_note = L1_DISCOUNT_NOTE
     return StatementItem(
         level=item.level,
         name=item.name,
@@ -646,9 +711,9 @@ def _build_item(
         actual_qty=actual,
         billed_qty=qty,
         unbilled_qty=unbilled if item.quantity_mode == "ACTUAL_SELECTABLE" else 0.0,
-        decision_reason_code=reason_code,
+        decision_reason_code=resolved_reason_code,
         category=item.category,
-        billing_note=item.billing_note,
+        billing_note=resolved_note,
     )
 
 
@@ -676,6 +741,8 @@ def precheck_statement_feasibility_lightweight(
     轻量级可行性检查 - 只验证业务数据总量是否足够
     优点：不执行完整的对账单生成，速度极快
     """
+    normalized_target = _normalize_target_amount(target_amount)
+
     if business_data_quantities is None:
         business_data_quantities = {}
 
@@ -701,13 +768,13 @@ def precheck_statement_feasibility_lightweight(
                 "total": item_total,
             })
 
-    if total_available < target_amount:
+    if total_available < normalized_target:
         return {
             "feasible": False,
             "reason_code": "INSUFFICIENT_DATA",
-            "message": f"业务数据可用金额 ¥{total_available:,.2f} 小于目标金额 ¥{target_amount:,.2f}",
+            "message": f"业务数据可用金额 ¥{total_available:,.2f} 小于目标金额 ¥{normalized_target:,.2f}",
             "total_available": total_available,
-            "target_amount": float(target_amount),
+            "target_amount": float(normalized_target),
             "item_count": len(item_details),
             "items": item_details,
         }
@@ -717,7 +784,7 @@ def precheck_statement_feasibility_lightweight(
         "reason_code": "OK",
         "message": "业务数据充足",
         "total_available": total_available,
-        "target_amount": float(target_amount),
+        "target_amount": float(normalized_target),
         "item_count": len(item_details),
         "items": item_details,
     }
@@ -776,6 +843,11 @@ def generate_smart_statement(
     column_mapping: Optional[Dict[str, str]] = None,
     rule_template_name: str = "standard",
 ) -> Statement:
+    raw_target_amount = _safe_float(target_amount, 0.0)
+    target_amount = _normalize_target_amount(raw_target_amount)
+    if target_amount <= 0:
+        raise ValueError("目标金额需大于0，且按10元取整后不能为0。")
+
     resolved_rule = resolve_allocation_rule(rule_template_name=rule_template_name, ratios=ratios)
     normalized_ratios = resolved_rule["ratios"]
     fill_order = resolved_rule["fill_order"]
@@ -785,6 +857,8 @@ def generate_smart_statement(
 
     all_items = load_config()
     warnings = []
+    if abs(raw_target_amount - target_amount) > 0.01:
+        warnings.append(f"目标金额已按10元整数倍向下取整：{raw_target_amount:.2f} -> {target_amount:.2f}")
     if enabled_item_ids:
         filtered = [item for item in all_items if item.id is not None and item.id in enabled_item_ids]
         missing_count = len(enabled_item_ids) - len(filtered)
@@ -933,6 +1007,7 @@ def generate_smart_statement(
     if no_report_fallback_item and no_report_fallback_item.price > 0:
         allocatable = min(remaining_after_selectable, max_sim_amount)
         qty = int(math.floor(allocatable / no_report_fallback_item.price))
+        qty = _align_qty_down(qty, _quantity_step_for_amount(no_report_fallback_item.price))
         sim_qty_map = {no_report_fallback_item.name: float(qty)} if qty > 0 else {}
         simulated_amount = qty * no_report_fallback_item.price
     else:
@@ -987,6 +1062,10 @@ def generate_smart_statement(
         if not tail_row:
             raise ValueError(f"尾差调平失败，差异:{diff:.2f}")
         statement_items.append(tail_row)
+
+    invalid_rows = [row.name for row in statement_items if not _amount_is_step_multiple(row.amount)]
+    if invalid_rows:
+        raise ValueError(f"存在非10元整数倍明细金额，请调整配置后重试：{', '.join(invalid_rows[:5])}")
 
     final_total = sum(i.amount for i in statement_items)
     final_diff = target_amount - final_total

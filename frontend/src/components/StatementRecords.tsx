@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, Tag, Space, Tooltip, Input, Card, App, Progress } from 'antd';
+import { Table, Button, Tag, Space, Tooltip, Input, Card, App, Progress, Popconfirm } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ReloadOutlined, ExportOutlined, PlusOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ExportOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import styled from 'styled-components';
 import { apiUrl } from '../lib/api';
@@ -49,6 +49,7 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
   const [data, setData] = useState<Statement[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [batchExporting, setBatchExporting] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const { message } = App.useApp();
   
@@ -261,6 +262,24 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
     }
   };
 
+  const handleBatchDelete = async () => {
+    setBatchDeleting(true);
+    try {
+      const response = await axios.post(apiUrl('/statements/batch/delete'), {
+        statement_ids: selectedRowKeys
+      });
+      
+      message.success(response.data.message || `成功删除 ${selectedRowKeys.length} 条对账单`);
+      setSelectedRowKeys([]);
+      loadData();
+    } catch (error) {
+      console.error('Batch delete failed:', error);
+      message.error('批量删除失败，请稍后重试');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   return (
     <Container>
       <Toolbar>
@@ -272,7 +291,7 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
             allowClear
             onChange={e => { if(!e.target.value) setSearchText('') }}
           />
-          <Button icon={<ReloadOutlined />} onClick={loadData} disabled={batchExporting}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={loadData} disabled={batchExporting || batchDeleting}>刷新</Button>
         </FilterGroup>
         <Space>
           {batchExporting ? (
@@ -283,12 +302,30 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
             <Button 
               icon={<ExportOutlined />} 
               onClick={handleBatchExport}
-              disabled={selectedRowKeys.length === 0}
+              disabled={selectedRowKeys.length === 0 || batchDeleting}
             >
               批量导出 {selectedRowKeys.length > 0 && `(${selectedRowKeys.length})`}
             </Button>
           )}
-          <Button type="primary" icon={<PlusOutlined />} onClick={onCreate} disabled={batchExporting}>新建对账单</Button>
+          <Popconfirm
+            title="批量删除"
+            description={`确定要删除选中的 ${selectedRowKeys.length} 条对账单吗？`}
+            onConfirm={handleBatchDelete}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            disabled={selectedRowKeys.length === 0 || batchDeleting}
+          >
+            <Button 
+              danger
+              icon={<DeleteOutlined />} 
+              disabled={selectedRowKeys.length === 0 || batchDeleting}
+              loading={batchDeleting}
+            >
+              批量删除 {selectedRowKeys.length > 0 && `(${selectedRowKeys.length})`}
+            </Button>
+          </Popconfirm>
+          <Button type="primary" icon={<PlusOutlined />} onClick={onCreate} disabled={batchExporting || batchDeleting}>新建对账单</Button>
         </Space>
       </Toolbar>
       
@@ -303,7 +340,7 @@ export const StatementRecords: React.FC<StatementRecordsProps> = ({ onNavigate, 
             selectedRowKeys,
             onChange: setSelectedRowKeys,
             getCheckboxProps: () => ({
-              disabled: batchExporting,
+              disabled: batchExporting || batchDeleting,
             }),
           }}
           pagination={{

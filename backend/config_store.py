@@ -648,6 +648,24 @@ class ConfigStore:
         """停用计费项（中文状态）"""
         return self.update_billing_item(item_id, {"status": "停用"})
 
+    def deactivate_billing_items_by_name(self, names: List[str]) -> int:
+        """按名称批量停用计费项（用于全局策略约束）"""
+        clean_names = [str(n).strip() for n in (names or []) if str(n).strip()]
+        if not clean_names:
+            return 0
+        placeholders = ", ".join(["?"] * len(clean_names))
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE billing_items
+                SET status = '停用', updated_at = ?
+                WHERE name IN ({placeholders})
+                """,
+                [_now_iso(), *clean_names],
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
     def activate_billing_item(self, item_id: int) -> Optional[Dict[str, Any]]:
         """启用计费项（中文状态）"""
         return self.update_billing_item(item_id, {"status": "启用"})

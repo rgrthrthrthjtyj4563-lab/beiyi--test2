@@ -168,6 +168,8 @@ app.add_middleware(_ApiPrefixMiddleware)
 TEMPLATE_PATH = Path(__file__).resolve().parent / "data" / "Statement of Account.xlsx"
 PREVIEW_TIMEOUT_SECONDS = 30
 RUN_SYNC_SUPPORTS_CANCELLABLE = "cancellable" in inspect.signature(anyio.to_thread.run_sync).parameters
+GLOBAL_DISABLED_ITEMS = ["数据存储扩容", "代理记账", "数据编辑整理服务"]
+config_store.deactivate_billing_items_by_name(GLOBAL_DISABLED_ITEMS)
 
 
 async def _run_parse_preview(**kwargs):
@@ -337,7 +339,7 @@ def _fill_statement_template(statement: Statement) -> str:
         ws.cell(idx, 6, item.price)
         ws.cell(idx, 7, item.amount)
         ws.cell(idx, 8, item.source)
-        ws.cell(idx, 9, meta.get("reason", ""))
+        ws.cell(idx, 9, item.billing_note or meta.get("reason", ""))
 
     total_row = start_row + len(items)
     clear_to = max(total_row + 4, 23)
@@ -640,35 +642,39 @@ async def precheck_statement(
             column_mapping=merged_mapping,
         )
 
-        # Step 1: 轻量级检查 - 验证数据总量是否足够
+        # Step 1: 轻量级检查 - 仅作为提示，不做阻断
         lightweight_result = precheck_statement_feasibility_lightweight(
             target_amount=target_amount,
             business_data_quantities=preview_quantities,
             config_items=load_config(),
         )
-
         if not lightweight_result.get("feasible"):
-            # 轻量级检查不通过，直接返回错误
-            logger.info(f"轻量级可行性检查不通过: {lightweight_result.get('reason_code')}")
-            result = lightweight_result
-        else:
-            # Step 2: 轻量级检查通过，执行完整检查获取详细信息
-            logger.info(f"轻量级检查通过，开始完整可行性检查")
-            result = precheck_statement_feasibility(
-                target_amount=target_amount,
-                customer=customer,
-                period=period,
-                ratios=ratios_dict,
-                business_data_file=temp_file_path,
-                business_data_quantities=preview_quantities,
-                column_mapping=merged_mapping,
-                rule_template_name=rule_template_name,
-            )
-            # 保留轻量级检查的详细信息
-            if "items" in lightweight_result:
-                result["item_details"] = lightweight_result["items"]
-                result["total_available"] = lightweight_result["total_available"]
-                result["item_count"] = lightweight_result["item_count"]
+            logger.info(f"轻量级可行性检查提示: {lightweight_result.get('reason_code')}")
+
+        # Step 2: 始终执行完整检查作为最终结果
+        result = precheck_statement_feasibility(
+            target_amount=target_amount,
+            customer=customer,
+            period=period,
+            ratios=ratios_dict,
+            business_data_file=temp_file_path,
+            business_data_quantities=preview_quantities,
+            column_mapping=merged_mapping,
+            rule_template_name=rule_template_name,
+        )
+
+        # 将轻量级检查结果附带回前端
+        result["lightweight_hint"] = {
+            "feasible": bool(lightweight_result.get("feasible")),
+            "reason_code": lightweight_result.get("reason_code"),
+            "message": lightweight_result.get("message"),
+            "total_available": lightweight_result.get("total_available"),
+            "item_count": lightweight_result.get("item_count"),
+        }
+        if "items" in lightweight_result:
+            result["item_details"] = lightweight_result["items"]
+            result["total_available"] = lightweight_result["total_available"]
+            result["item_count"] = lightweight_result["item_count"]
 
         # 如果后端解析了文件，将解析结果返回给前端复用
         if preview_result and not preview_json:
@@ -810,6 +816,38 @@ def get_statement_sources(id: str):
         raise HTTPException(status_code=404, detail="Statement not found")
     rows = config_store.list_statement_sources(id)
     return [DataSourceRecord(**r) for r in rows]
+
+
+@app.delete("/statements/{id}")
+def delete_statement(id: str):
+    """删除单个对账单"""
+    record = manager.get(id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    success = manager.delete(id)
+    if success:
+        return {"message": "删除成功", "deleted_id": id}
+    raise HTTPException(status_code=500, detail="删除失败")
+
+
+from pydantic import BaseModel
+
+class BatchStatementDelete(BaseModel):
+    statement_ids: list[str]
+
+
+@app.post("/statements/batch/delete")
+def batch_delete_statements(payload: BatchStatementDelete):
+    """批量删除对账单"""
+    if not payload.statement_ids:
+        raise HTTPException(status_code=400, detail="请选择要删除的对账单")
+
+    deleted_count = manager.batch_delete(payload.statement_ids)
+    return {
+        "message": f"成功删除 {deleted_count} 条对账单",
+        "deleted_count": deleted_count,
+        "requested_count": len(payload.statement_ids)
+    }
 
 
 @app.get("/settings/field-mappings", response_model=FieldMappingTemplate)

@@ -331,7 +331,11 @@ export const StatementDetail: React.FC<StatementDetailProps> = ({
           <div>
             <div>实际数量: {record.actual_qty}</div>
             <div>计费数量: {record.billed_qty}</div>
-            <div>未计费: {record.unbilled_qty}</div>
+            <div>
+              {record.level === 'L1' && record.quantity_mode === 'ACTUAL_SELECTABLE'
+                ? `折让条数（月度商议）: ${record.unbilled_qty}`
+                : `未计费: ${record.unbilled_qty}`}
+            </div>
           </div>
         }>
           <span>{qty}</span>

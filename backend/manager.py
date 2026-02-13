@@ -432,3 +432,41 @@ class StatementManager:
 
             row = conn.execute("SELECT * FROM statements WHERE id = ?", (stmt_id,)).fetchone()
             return self._build_record(conn, row)
+
+    def delete(self, stmt_id: str) -> bool:
+        """删除单个对账单及其关联数据"""
+        with self._connect() as conn:
+            # 先检查是否存在
+            row = conn.execute("SELECT id FROM statements WHERE id = ?", (stmt_id,)).fetchone()
+            if not row:
+                return False
+
+            # 删除关联的历史记录
+            conn.execute("DELETE FROM statement_history WHERE statement_id = ?", (stmt_id,))
+            # 删除关联的明细项
+            conn.execute("DELETE FROM statement_items WHERE statement_id = ?", (stmt_id,))
+            # 删除主记录
+            conn.execute("DELETE FROM statements WHERE id = ?", (stmt_id,))
+            conn.commit()
+            return True
+
+    def batch_delete(self, stmt_ids: List[str]) -> int:
+        """批量删除对账单及其关联数据"""
+        if not stmt_ids:
+            return 0
+
+        deleted_count = 0
+        with self._connect() as conn:
+            for stmt_id in stmt_ids:
+                # 检查是否存在
+                row = conn.execute("SELECT id FROM statements WHERE id = ?", (stmt_id,)).fetchone()
+                if row:
+                    # 删除关联的历史记录
+                    conn.execute("DELETE FROM statement_history WHERE statement_id = ?", (stmt_id,))
+                    # 删除关联的明细项
+                    conn.execute("DELETE FROM statement_items WHERE statement_id = ?", (stmt_id,))
+                    # 删除主记录
+                    conn.execute("DELETE FROM statements WHERE id = ?", (stmt_id,))
+                    deleted_count += 1
+            conn.commit()
+        return deleted_count

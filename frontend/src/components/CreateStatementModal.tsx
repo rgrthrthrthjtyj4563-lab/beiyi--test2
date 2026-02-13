@@ -36,6 +36,12 @@ export const CreateStatementModal: React.FC<CreateStatementModalProps> = ({ open
     return dateVal.format('YYYY-MM');
   };
 
+  const normalizeTargetAmount = (raw: any) => {
+    const num = Number(raw || 0);
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    return Math.floor(num / 10) * 10;
+  };
+
   const checkFeasibility = async (values: any) => {
     const period = resolvePeriodString(values);
     if (!period) {
@@ -45,7 +51,8 @@ export const CreateStatementModal: React.FC<CreateStatementModalProps> = ({ open
     setCheckingFeasibility(true);
     try {
       const formData = new FormData();
-      formData.append('target_amount', values.target_amount);
+      const normalizedTarget = normalizeTargetAmount(values.target_amount);
+      formData.append('target_amount', String(normalizedTarget));
       formData.append('customer', values.customer_name);
       formData.append('period', period);
       
@@ -91,7 +98,8 @@ export const CreateStatementModal: React.FC<CreateStatementModalProps> = ({ open
       const submitData = new FormData();
       submitData.append('customer', values.customer_name);
       submitData.append('period', period);
-      submitData.append('target_amount', values.target_amount);
+      const normalizedTarget = normalizeTargetAmount(values.target_amount);
+      submitData.append('target_amount', String(normalizedTarget));
       
       if (parseResult) {
         submitData.append('preview_json', JSON.stringify(parseResult));
@@ -126,8 +134,13 @@ export const CreateStatementModal: React.FC<CreateStatementModalProps> = ({ open
       setLoading(true);
       const feasibility = await checkFeasibility(values);
       if (!feasibility?.feasible) {
-        message.error(feasibility?.reason || '当前配置无法生成对账单，请调整参数后重试');
+        const errorMsg = feasibility?.message || feasibility?.reason_code || feasibility?.reason || '当前配置无法生成对账单，请调整参数后重试';
+        message.error(errorMsg);
         return;
+      }
+      if (feasibility?.lightweight_hint && !feasibility.lightweight_hint.feasible) {
+        const hintMsg = feasibility.lightweight_hint.message || '业务数据不足，将依赖模拟项补齐';
+        message.warning(hintMsg);
       }
       const parseResult = feasibility?.parse_result || feasibilityParseResult;
       await submitStatement(values, parseResult);
@@ -259,10 +272,27 @@ export const CreateStatementModal: React.FC<CreateStatementModalProps> = ({ open
         <Form.Item name="statement_date" label="对账日期" rules={[{ required: true, message: '请选择对账日期' }]}>
           <DatePicker picker="month" style={{ width: '100%' }} placeholder="请选择对账日期" />
         </Form.Item>
-        <Form.Item name="target_amount" label="目标金额" rules={[{ required: true, message: '请输入目标金额' }]}>
+        <Form.Item
+          name="target_amount"
+          label="目标金额"
+          rules={[
+            { required: true, message: '请输入目标金额' },
+            {
+              validator: (_, value) => {
+                const num = Number(value);
+                if (!Number.isFinite(num) || num <= 0) return Promise.reject(new Error('目标金额必须大于0'));
+                if (num % 10 !== 0) return Promise.reject(new Error('目标金额必须为10元整数倍'));
+                return Promise.resolve();
+              },
+            },
+          ]}
+        >
           <InputNumber
             style={{ width: '100%' }}
             prefix="¥"
+            min={10}
+            step={10}
+            precision={0}
             formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
             parser={value => value!.replace(/\$\s?|(,*)/g, '')}
           />

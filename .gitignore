@@ -60,3 +60,6 @@ logs/
 *.backup
 *.tmp
 .vercel
+
+# Archives
+*.zip

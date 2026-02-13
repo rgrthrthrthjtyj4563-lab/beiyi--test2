@@ -192,19 +192,77 @@ class StatementRegressionTests(unittest.TestCase):
             self.assertEqual(int(match.quantity), 2)
             self.assertAlmostEqual(float(match.amount), float(l3_non_sim.price) * 2, places=6)
 
-    def test_tail_diff_is_balanced_into_l4_only(self):
+    def test_generated_rows_are_multiples_of_ten(self):
         with tempfile.TemporaryDirectory() as td:
             _, logic = _load_fresh_app(td)
             stmt = logic.generate_smart_statement(
-                target_amount=100001,
-                customer="尾差调平测试",
+                target_amount=100001,  # 将按新规则向下取整到 100000
+                customer="10元倍数规则测试",
                 period="2026-01",
                 business_data_file=None,
             )
-            self.assertAlmostEqual(float(stmt.summary.generated_amount), 100001.0, places=2)
-            tail_rows = [i for i in stmt.items if i.level == "L4" and i.source == "尾差调平"]
-            self.assertEqual(len(tail_rows), 1)
-            self.assertAlmostEqual(float(tail_rows[0].amount), 1.0, places=6)
+            self.assertAlmostEqual(float(stmt.target_amount), 100000.0, places=2)
+            self.assertAlmostEqual(float(stmt.summary.generated_amount), 100000.0, places=2)
+            for row in stmt.items:
+                self.assertAlmostEqual(float(row.amount) % 10.0, 0.0, places=6)
+
+    def test_global_disabled_items_are_inactive(self):
+        with tempfile.TemporaryDirectory() as td:
+            main, _ = _load_fresh_app(td)
+            active_items = main.config_store.list_billing_items(include_inactive=False)
+            active_names = {str(x.get("name")) for x in active_items}
+            self.assertNotIn("数据存储扩容", active_names)
+            self.assertNotIn("代理记账", active_names)
+            self.assertNotIn("数据编辑整理服务", active_names)
+
+    def test_l1_unbilled_is_marked_as_monthly_discount(self):
+        with tempfile.TemporaryDirectory() as td:
+            main, logic = _load_fresh_app(td)
+            items = main.config_store.list_billing_items(include_inactive=True)
+            l1_pick = next((x for x in items if x["level"] == "L1" and float(x.get("price", 0)) > 0), None)
+            self.assertIsNotNone(l1_pick)
+
+            l4_tail = next((x for x in items if x["level"] == "L4" and float(x.get("price", 0)) > 0), None)
+            self.assertIsNotNone(l4_tail)
+
+            main.put_allocation_rule(
+                main.AllocationRuleTemplateUpdate(
+                    template_name="standard",
+                    strategy_name="equal_split_v1",
+                    selection_strategy="priority_greedy_v1",
+                    ratios={"L1": 1.0, "L2": 0.0, "L3": 0.0, "L4": 0.0},
+                    l4_max_ratio=0.1,
+                    ratio_warning_threshold=0.5,
+                    fill_order=["L2", "L3", "L4"],
+                    enabled_item_ids=[int(l1_pick["id"]), int(l4_tail["id"])],
+                    tail_diff_threshold=1000,
+                    max_simulation_ratio=1.0,
+                )
+            )
+
+            df = pd.DataFrame(
+                {
+                    "年份": [2026],
+                    "月份": [1],
+                    "服务提供方": ["A"],
+                    str(l1_pick["name"]): [100],
+                }
+            )
+            excel_path = Path(td) / "l1_discount.xlsx"
+            df.to_excel(excel_path, index=False)
+
+            stmt = logic.generate_smart_statement(
+                target_amount=float(l1_pick["price"]) * 30,  # 使其出现未计费
+                customer="L1折让标记测试",
+                period="2026-01",
+                business_data_file=str(excel_path),
+                rule_template_name="standard",
+            )
+            row = next((i for i in stmt.items if i.name == str(l1_pick["name"])), None)
+            self.assertIsNotNone(row)
+            self.assertGreater(float(row.unbilled_qty), 0.0)
+            self.assertEqual(row.decision_reason_code, "MONTHLY_NEGOTIATED_DISCOUNT")
+            self.assertIn("月度商议数据折让条数", row.billing_note)
 
     def test_actual_selectable_respects_ratio_bounds(self):
         with tempfile.TemporaryDirectory() as td:
@@ -576,6 +634,8 @@ class StatementRegressionTests(unittest.TestCase):
 
             for start, end in ranges:
                 for target in range(start, end + 1):
+                    if target % 10 != 0:
+                        continue
                     pre = logic.precheck_statement_feasibility(
                         target_amount=float(target),
                         customer="P0-4 Gate",
