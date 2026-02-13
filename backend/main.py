@@ -2,41 +2,78 @@ from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form, Backgr
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from logic import (
-    load_config,
-    generate_smart_statement,
-    precheck_statement_feasibility,
-    precheck_statement_feasibility_lightweight,
-    load_config_seed_payload,
-    parse_business_data_preview,
-    get_allocation_strategies,
-    resolve_allocation_rule,
-)
-from template_parser import (
-    generate_standard_input_template,
-    parse_standard_template,
-    parse_standard_template_l1,
-    validate_standard_template,
-)
-from models import (
-    Statement,
-    BillingItem,
-    BillingItemConfig,
-    BillingItemConfigCreate,
-    BillingItemConfigUpdate,
-    BatchBillingItemUpdate,
-    BatchBillingItemDelete,
-    BusinessDataPreview,
-    DataSourceRecord,
-    FieldMappingTemplate,
-    FieldMappingTemplateUpdate,
-    AllocationRuleTemplate,
-    AllocationRuleTemplateUpdate,
-    AllocationRuleVersion,
-    AllocationStrategyOption,
-)
-from manager import StatementManager, StatementRecord
-from config_store import config_store
+try:
+    from .logic import (
+        load_config,
+        generate_smart_statement,
+        precheck_statement_feasibility,
+        precheck_statement_feasibility_lightweight,
+        load_config_seed_payload,
+        parse_business_data_preview,
+        get_allocation_strategies,
+        resolve_allocation_rule,
+    )
+    from .template_parser import (
+        generate_standard_input_template,
+        parse_standard_template,
+        parse_standard_template_l1,
+        validate_standard_template,
+    )
+    from .models import (
+        Statement,
+        BillingItem,
+        BillingItemConfig,
+        BillingItemConfigCreate,
+        BillingItemConfigUpdate,
+        BatchBillingItemUpdate,
+        BatchBillingItemDelete,
+        BusinessDataPreview,
+        DataSourceRecord,
+        FieldMappingTemplate,
+        FieldMappingTemplateUpdate,
+        AllocationRuleTemplate,
+        AllocationRuleTemplateUpdate,
+        AllocationRuleVersion,
+        AllocationStrategyOption,
+    )
+    from .manager import StatementManager, StatementRecord
+    from .config_store import config_store
+except ImportError:
+    from logic import (
+        load_config,
+        generate_smart_statement,
+        precheck_statement_feasibility,
+        precheck_statement_feasibility_lightweight,
+        load_config_seed_payload,
+        parse_business_data_preview,
+        get_allocation_strategies,
+        resolve_allocation_rule,
+    )
+    from template_parser import (
+        generate_standard_input_template,
+        parse_standard_template,
+        parse_standard_template_l1,
+        validate_standard_template,
+    )
+    from models import (
+        Statement,
+        BillingItem,
+        BillingItemConfig,
+        BillingItemConfigCreate,
+        BillingItemConfigUpdate,
+        BatchBillingItemUpdate,
+        BatchBillingItemDelete,
+        BusinessDataPreview,
+        DataSourceRecord,
+        FieldMappingTemplate,
+        FieldMappingTemplateUpdate,
+        AllocationRuleTemplate,
+        AllocationRuleTemplateUpdate,
+        AllocationRuleVersion,
+        AllocationStrategyOption,
+    )
+    from manager import StatementManager, StatementRecord
+    from config_store import config_store
 from openpyxl import load_workbook
 import tempfile
 import os
@@ -52,8 +89,54 @@ import functools
 from typing import Tuple, Dict, Optional
 
 app = FastAPI(title="Smart Statement Generator")
-manager = StatementManager()
 logger = logging.getLogger(__name__)
+
+# 在初始化 manager 之前，检查并复制静态数据文件到 /tmp
+def _init_tmp_storage():
+    try:
+        logger.info(f"Current working directory: {os.getcwd()}")
+        logger.info(f"Directory listing: {os.listdir('.')}")
+        
+        # 1. 初始化 SQLite 数据库目录
+        db_path = Path(os.getenv("SOA_DB_PATH", "/tmp/app.db")).resolve()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 2. 查找并复制 statements_db.json
+        json_target = Path(os.getenv("STATEMENTS_JSON_PATH", "/tmp/statements_db.json")).resolve()
+        
+        # 尝试多个可能的源路径
+        possible_sources = [
+            Path("statements_db.json").resolve(),
+            Path(__file__).resolve().parent.parent / "statements_db.json",
+            Path("/var/task/statements_db.json"),  # AWS Lambda 常见路径
+            Path("backend/statements_db.json").resolve(),
+        ]
+        
+        json_source = None
+        for src in possible_sources:
+            if src.exists():
+                json_source = src
+                break
+        
+        if json_source:
+            logger.info(f"Found statements_db.json at {json_source}")
+            if not json_target.exists():
+                logger.info(f"Seeding statements db from {json_source} to {json_target}")
+                shutil.copy2(json_source, json_target)
+            else:
+                logger.info(f"Target {json_target} already exists, skipping copy")
+        else:
+            logger.warning("Could not find statements_db.json in any known location")
+            
+        # 3. 复制 backend/data 下的配置文件
+        # 确保 config.xlsx 可访问
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize tmp storage: {e}")
+
+_init_tmp_storage()
+
+manager = StatementManager()
 
 
 class _ApiPrefixMiddleware(BaseHTTPMiddleware):

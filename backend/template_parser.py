@@ -2,8 +2,12 @@ import pandas as pd
 from typing import Dict, List, Optional
 from pathlib import Path
 
-from logic import load_config, _safe_float
-from models import BillingItem
+try:
+    from .logic import load_config, _safe_float
+    from .models import BillingItem
+except ImportError:
+    from logic import load_config, _safe_float
+    from models import BillingItem
 
 
 def _template_items(config_items: List[BillingItem]) -> List[BillingItem]:

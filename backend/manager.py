@@ -8,7 +8,10 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
-from models import Statement, StatementItem, StatementSummary
+try:
+    from .models import Statement, StatementItem, StatementSummary
+except ImportError:
+    from models import Statement, StatementItem, StatementSummary
 
 _DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "app.db"
 DB_PATH = Path(os.getenv("SOA_DB_PATH", str(_DEFAULT_DB_PATH))).expanduser().resolve()
@@ -194,6 +197,8 @@ class StatementManager:
                         record.rule_template_name,
                         record.rule_template_version,
                         record.rule_strategy_name,
+                        record.engine_version,
+                        record.rule_snapshot_version,
                         json.dumps(record.rule_snapshot, ensure_ascii=False) if record.rule_snapshot else None,
                         record.created_at,
                         record.updated_at,

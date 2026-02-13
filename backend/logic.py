@@ -5,8 +5,12 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from config_store import config_store
-from models import BillingItem, Statement, StatementItem, StatementSummary
+try:
+    from .config_store import config_store
+    from .models import BillingItem, Statement, StatementItem, StatementSummary
+except ImportError:
+    from config_store import config_store
+    from models import BillingItem, Statement, StatementItem, StatementSummary
 
 CONFIG_PATH = Path(__file__).resolve().parent / "data" / "config.xlsx"
 LEVELS = ["L1", "L2", "L3", "L4"]
@@ -163,11 +167,23 @@ def load_config() -> List[BillingItem]:
 
 
 def load_config_seed_payload() -> List[Dict]:
+    # 定义默认的回退数据，以防配置文件丢失
+    fallback_items = [
+        {"level": "L1", "name": "租户基础服务费", "unit": "元/月", "price": 2000.0, "quantity_mode": "ACTUAL_FULL", "must_use": True},
+        {"level": "L2", "name": "标准报告生成费", "unit": "份", "price": 50.0, "quantity_mode": "SIMULATED", "can_simulate": True},
+        {"level": "L3", "name": "增值服务费", "unit": "次", "price": 100.0, "quantity_mode": "SIMULATED", "can_simulate": True},
+        {"level": "L4", "name": "其他费用", "unit": "项", "price": 10.0, "quantity_mode": "SIMULATED", "can_simulate": True, "tail_balance_eligible": True},
+    ]
+
     try:
+        if not CONFIG_PATH.exists():
+            print(f"Config file not found at: {CONFIG_PATH}. Using fallback items.")
+            return fallback_items
+            
         df = pd.read_excel(CONFIG_PATH)
     except Exception as e:
-        print(f"Error loading config: {e}")
-        return []
+        print(f"Error loading config: {e}. Using fallback items.")
+        return fallback_items
 
     items = []
     for _, row in df.iterrows():
